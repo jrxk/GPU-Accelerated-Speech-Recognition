@@ -133,3 +133,26 @@ void matrixMulTB(cuMatrix<float>* x, cuMatrix<float>*y, cuMatrix<float>*z)
 		exit(0);
 	}
 }
+
+void matrixAdd(cuMatrix<float> *x, cuMatrix<float> *y, cuMatrix<float> *z, float lambda) {
+    float alpha = 1.0;
+    cublasStatus_t stat;
+    stat = cublasSgeam(getHandle(),
+                       CUBLAS_OP_N,
+                       CUBLAS_OP_N,
+                       x->cols, y->rows,
+                       &alpha,
+                       x->getDev(), x->cols,
+                       &lambda,
+                       y->getDev(), y->cols,
+                       z->getDev(), z->cols);
+    cudaStreamSynchronize(0);
+    getLastCudaError("matrixAdd");
+    if (stat != CUBLAS_STATUS_SUCCESS) {
+        printf("matrixAdd cublasSgemm error\n");
+        cudaFree(x->getDev());
+        cudaFree(y->getDev());
+        cudaFree(z->getDev());
+        exit(0);
+    }
+}
