@@ -13,14 +13,14 @@ public:
             hidden_layer_outputs[i] = new cuMatrix<float>(batch_size, hidden_size, 1);
         }
 
-        outputs->toGpu();
+        // outputs->toGpu();
     }
 
-    cuMatrix<float>* forward(cuMatrix<float>* inputs, cuMatrix<float>** hidden_0);
+    cuMatrix<float>** forward(cuMatrix<float>** inputs, cuMatrix<float>** pre_hidden);
 
 private:
     
-    cuMatrix<float>* outputs; // time_step * [batch_size, hidden_size]
+    cuMatrix<float>** outputs; // time_step * [batch_size, hidden_size]
     cuMatrix<float>** hidden_layer_outputs; // num_layers * batch * hidden_size
 
     RNN_Cell** rnn_cell;
