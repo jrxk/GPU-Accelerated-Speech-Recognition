@@ -31,9 +31,9 @@ int main() {
     // Linear* fc = new Linear(5, 10, 20);
     // cuMatrix<float>* y = fc->forward(x);
 
-    Linear* mlp1 = new Linear(batch_size*seq_len, input_size, hidden_1);
-    Linear* mlp2 = new Linear(batch_size*seq_len, hidden_1, hidden_2);
-    Linear* mlp3 = new Linear(batch_size*seq_len, hidden_2, hidden_3);
+    Linear* mlp1 = new Linear(batch_size * seq_len, input_size, hidden_1);
+    Linear* mlp2 = new Linear(batch_size * seq_len, hidden_1, hidden_2);
+    Linear* mlp3 = new Linear(batch_size * seq_len, hidden_2, hidden_3);
     // RNN* rnn = new RNN(batch_size, input_size, rnn_hidden_size, seq_len, rnn_num_layers);
 
     cuMatrix<float>* x = new cuMatrix<float>(batch_size * seq_len, input_size, 1);
@@ -41,6 +41,12 @@ int main() {
     cuMatrix<float>* x1 = mlp1->forward(x);
     cuMatrix<float>* x2 = mlp2->forward(x1);
     cuMatrix<float>* x3 = mlp3->forward(x2);
+
+    cuMatrix<float>** x_seq = new cuMatrix<float>*[seq_len];
+    for (int i = 0; i < seq_len; i++) { 
+        x_seq[i] = new cuMatrix<float>(x3, i * batch_size * hidden_3, batch_size, hidden_3, 1);
+        std::cout << x_seq[i]->getLen() << std::endl;
+    }
 
 
     // //Test RNN (b,i,h,t,l)
