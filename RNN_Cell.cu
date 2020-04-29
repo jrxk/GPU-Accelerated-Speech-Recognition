@@ -36,7 +36,7 @@ void RNN_Cell::initRandom() {
 * pre_hidden: [b, hidden_size]
 * output: [b, hidden_size]
 */
-cuMatrix<float>* RNN_Cell::forward(cuMatrix<float>* inputs, cuMatrix<float>* pre_hidden) {
+cuMatrix<float>* RNN_Cell::forward(cuMatrix<float>* inputs, cuMatrix<float>* pre_hidden, cuMatrix<float>* outputs) {
     matrixMul(inputs, w_ih, ih_outputs);
     matrixMul(pre_hidden, w_hh, hh_outputs);
     matrixAdd(ih_outputs, hh_outputs, outputs, 1);
