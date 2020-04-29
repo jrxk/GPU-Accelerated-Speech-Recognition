@@ -15,7 +15,7 @@ class cuMatrix
 {
 public:
 	/*constructed function with hostData*/
-	cuMatrix(T *_data, int _n,int _m, int _c):rows(_n), cols(_m), channels(_c), hostData(NULL), devData(NULL){
+	cuMatrix(T *_data, int _n,int _m, int _c):rows(_n), cols(_m), channels(_c), hostData(NULL), devData(NULL), isShallow(false) {
 		/*malloc host data*/
 		mallocHost();
 		/*deep copy */
@@ -23,11 +23,16 @@ public:
 	}
 	
 	/*constructed function with rows and cols*/
-	cuMatrix(int _n,int _m, int _c):rows(_n), cols(_m), channels(_c), hostData(NULL), devData(NULL){
+	cuMatrix(int _n,int _m, int _c):rows(_n), cols(_m), channels(_c), hostData(NULL), devData(NULL), isShallow(false){
 	}
+
+	cuMatrix(int _n, int _m, int _c, T* hostPtr, T* devPtr):rows(_n), cols(_m), channels(_c), hostData(hostPtr), devData(devPtr), isShallow(true) {
+	}
+
 
 	/*free cuda memery*/
 	void freeCudaMem(){
+		if (isShallow) return;
 		if(NULL != devData){
 			MemoryMonitor::instance()->freeGpuMemory(devData);
 			devData = NULL;
@@ -36,14 +41,20 @@ public:
 
 	/*destruction function*/
 	~cuMatrix(){
-		if(NULL != hostData)
-			MemoryMonitor::instance()->freeCpuMemory(hostData);
-		if(NULL != devData)
-			MemoryMonitor::instance()->freeGpuMemory(devData);
+		if (!isShallow) {
+			if(NULL != hostData)
+				MemoryMonitor::instance()->freeCpuMemory(hostData);
+			if(NULL != devData)
+				MemoryMonitor::instance()->freeGpuMemory(devData);
+		}
 	}
 
 	/*copy the device data to host data*/ 
 	void toCpu(){
+		if (isShallow) {
+			printf("Error: attempting to manipulate memory of a shallow copy.");
+			return;
+		}
 		cudaError_t cudaStat;
 		mallocDev();
 		mallocHost();
@@ -58,6 +69,10 @@ public:
 
 	/*copy the host data to device data*/
 	void toGpu(){
+		if (isShallow) {
+			printf("Error: attempting to manipulate memory of a shallow copy.");
+			return;
+		}
 		cudaError_t cudaStat;
 		mallocDev();
 		mallocHost();
@@ -72,12 +87,20 @@ public:
 
 	/*copy the host data to device data with cuda-streams*/
 	void toGpu(cudaStream_t stream1){
+		if (isShallow) {
+			printf("Error: attempting to manipulate memory of a shallow copy.");
+			return;
+		}
 		mallocDev();
 		checkCudaErrors(cudaMemcpyAsync(devData, hostData, sizeof(*devData) * cols * rows * channels, cudaMemcpyHostToDevice, stream1));
 	}
 	
 	/*set all device memory to be zeros*/
 	void gpuClear(){
+		if (isShallow) {
+			printf("Error: attempting to manipulate memory of a shallow copy.");
+			return;
+		}
 		mallocDev();
 		cudaError_t cudaStat;
 		cudaStat = cudaMemset(devData,0,sizeof(*devData) * cols * rows * channels);
@@ -88,6 +111,10 @@ public:
 	}
 
 	void cpuClear(){
+		if (isShallow) {
+			printf("Error: attempting to manipulate memory of a shallow copy.");
+			return;
+		}
 		mallocHost();
 		memset(hostData, 0, cols * rows * channels * sizeof(*hostData));
 	}
@@ -138,6 +165,9 @@ private:
 
 	/*device data*/
 	T *devData;
+
+	/* indicates this matrix is a shallow copy of another matrix, therefore can only modify data, no free/allocate allowed */
+	bool isShallow;
 private:
 	void mallocHost(){
 		if(NULL == hostData){

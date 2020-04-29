@@ -23,11 +23,11 @@ cublasHandle_t& getHandle()
 void matrixMul(cuMatrix<float>* x, cuMatrix<float>*y, cuMatrix<float>*z)
 {
 	if(x->channels != 1 || y->channels != 1 || z->channels != 1){
-		printf("matrix mul chanels != 1\n");
+		printf("matrix mul channels != 1\n");
 		exit(0);
 	}
 	if(x->cols != y->rows || z->rows != x->rows || z->cols != y->cols){
-		printf("matrix mul chanels != 1\n");
+		printf("matrix mul dimension mismatch\n");
 		exit(0);
 	}
 	float alpha = 1.0;
