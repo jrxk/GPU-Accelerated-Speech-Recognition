@@ -160,6 +160,16 @@ public:
 		return rows * cols;
 	}
 
+	/*get rows*/
+	int getRows(){
+		return rows;
+	}
+
+	/*get cols*/
+	int getCols(){
+		return cols;
+	}
+
 	T  *& getHost(){
 		mallocHost();
 		return hostData;
