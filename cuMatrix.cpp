@@ -3,7 +3,17 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 #include "cublas_v2.h"
+#include <iostream>
 
+void printMatrixInfo(cuMatrix<float>* mat) {
+	std::cout << "shape: (" << mat->rows << ", " << mat->cols << ")" << std::endl;
+	for (int i = 0; i < mat->rows; i++) {
+		for (int j = 0; j < mat->cols; j++) {
+			std::cout << mat->getHost()[i*mat->cols+j] << "\t";
+		}
+		std::cout << std::endl;
+	}
+}
 
 cublasHandle_t& getHandle()
 {

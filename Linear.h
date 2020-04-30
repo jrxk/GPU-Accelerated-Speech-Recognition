@@ -15,16 +15,14 @@ public:
     }
 
     void initRandom();
+    void initParams(float* w, float* b);
     cuMatrix<float>* forward(cuMatrix<float>* inputs);
 
-private:
     cuMatrix<float>* w;
     cuMatrix<float>* b;
-
     cuMatrix<float>* outputs;
 
     int input_size;
     int output_size;
     int batch_size;
-
 };
