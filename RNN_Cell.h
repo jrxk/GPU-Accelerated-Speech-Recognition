@@ -14,9 +14,10 @@ public:
     }
 
     void initRandom();
+    void initParams(float* _w_ih, float* _w_hh, float* _b_ih, float* _b_hh);
     cuMatrix<float>* forward(cuMatrix<float>* inputs, cuMatrix<float>* pre_hidden, cuMatrix<float>* outputs);
 
-private:
+// private:
     cuMatrix<float>* w_ih; // input_size * hidden_size
     cuMatrix<float>* w_hh; // hidden_size * hidden_size
     cuMatrix<float>* b_ih; // hidden_size

@@ -22,7 +22,6 @@ public:
 
     cuMatrix<float>* forward(cuMatrix<float>* inputs);
 
-private:
     cuMatrix<float>** h_0s; // num_layers * [batch_size, hidden_size]
     cuMatrix<float>** hiddens; // num_layers * [seq_len * batch, hidden_size]
     // cuMatrix<float>** outputs; // time_step * [batch_size, hidden_size]
