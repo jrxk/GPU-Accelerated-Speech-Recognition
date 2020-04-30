@@ -1,4 +1,6 @@
 #include <algorithm> 
+#include <iostream>
+
 #include "CTCBeamSearch.h"
 
 using namespace std;
@@ -8,6 +10,35 @@ float* getRowData(float* data, int row, int length){
     float* ret= new float[length];
     memcpy(ret, data+row*length, length*sizeof(float));
     return ret;
+}
+
+
+
+void printMap (map<string, float> dict){
+    for(map<string, float >::const_iterator it = dict.begin(); it != dict.end(); ++it)
+    {
+        std::cout << it->first << "," << it->second << "\n";
+    }
+}
+
+void printSet (set<string> myset){
+    std::set<std::string>::iterator it = myset.begin();
+    while (it != myset.end())
+    {
+        std::cout << (*it) << "," << "\n";
+        it++;
+    }
+}
+
+void CTCBeamSearch::helper(){
+    std::cout << "======print blankPath======" << std::endl;
+    printSet(blankPath);
+    std::cout << "======print blankPathScore======" << std::endl;
+    printMap(blankPathScore);
+    std::cout << "======print path======" << std::endl;
+    printSet(path);
+    std::cout << "======print pathScore======" << std::endl;
+    printMap(pathScore);
 }
 
 string CTCBeamSearch::decode(cuMatrix<float>* seqProb){
@@ -25,11 +56,16 @@ string CTCBeamSearch::decode(cuMatrix<float>* seqProb){
 
     // iterate through timestep
     for (int t = 1; t < timestep; t++){
+        std::cout << "time step: " << t << std::endl;
         // get current timestep data (a row)
         // float* prob = getRowData(seqProb->getDev(), t, vocabSize);
         float* prob = getRowData(seqProb->getHost(), t, vocabSize);
         extendWithBlank(prob);
         extendWithSymbol(prob);
+        blankPath = updateBlankPath;
+        blankPathScore = updateBlankPathScore;
+        path = updateSymbolPath;
+        pathScore = updateSymbolPathScore;
         prune();
     }
 
@@ -49,6 +85,7 @@ string CTCBeamSearch::decode(cuMatrix<float>* seqProb){
 }
 
 void CTCBeamSearch::initialPath(float* prob){
+    std::cout << "entering initialPath......" << std::endl;
     string initpath = "";
     blankPathScore.insert(pair<string, float>(initpath, prob[blankID]));
     blankPath.insert(initpath);
@@ -64,10 +101,14 @@ void CTCBeamSearch::initialPath(float* prob){
         path.insert(initpath);
     }
 
+    helper();
+
     prune();
 }
 
 void CTCBeamSearch::prune(){
+    std::cout << "entering prune......" << std::endl;
+
     vector<float> scores;
     // gather all relevant scores
     set<string>::iterator iterBlank;
@@ -102,11 +143,18 @@ void CTCBeamSearch::prune(){
             ++iterSymbol;
         }
     }
+
+    helper();
+    
 }
 
 void CTCBeamSearch::extendWithBlank(float* prob){
-    map<string, float> updateBlankPathScore;
-    set<string> updateBlankPath;
+    std::cout << "entering extendWithBlank......" << std::endl;
+
+    // map<string, float> updateBlankPathScore;
+    // set<string> updateBlankPath;
+    updateBlankPathScore.clear();
+    updateBlankPath.clear();
 
     set<string>::iterator iterBlank;
     for (iterBlank=blankPath.begin(); iterBlank!=blankPath.end(); iterBlank++){
@@ -136,28 +184,47 @@ void CTCBeamSearch::extendWithBlank(float* prob){
     }
 
     // update blankPathScore, blankPath
-    blankPathScore = updateBlankPathScore;
-    blankPath = updateBlankPath;
+    // blankPathScore = updateBlankPathScore;
+    // blankPath = updateBlankPath;
 }
 
 void CTCBeamSearch::extendWithSymbol(float* prob){
-    map<string, float> updateSymbolPathScore;
-    set<string> updateSymbolPath;
+    std::cout << "entering extendWithSymbol......" << std::endl;
+    std::cout << "print blankPath: " << std::endl;
+    printSet(blankPath);
+    std::cout << "print blankPathScore: " << std::endl;
+    printMap(blankPathScore);
+    std::cout << "entering extendWithSymbol blank part......" << std::endl;
+
+
+    // map<string, float> updateSymbolPathScore;
+    // set<string> updateSymbolPath;
+
+    updateSymbolPathScore.clear();
+    updateSymbolPath.clear();
 
     set<string>::iterator iterBlank;
     for (iterBlank=blankPath.begin(); iterBlank!=blankPath.end(); iterBlank++){
+        std::cout << "current blank path: " << *iterBlank << std::endl;
+
         for (int i = 0; i < vocabSize; i++){
+            std::cout << "index vocab: " << i << std::endl;
+            
             // skip if blank
             if(i == blankID){
                 continue;
             }
 
             string newPath = *iterBlank + vocab.at(i);
-            float score = blankPathScore.at(newPath) * prob[i];
+            std::cout << "newPath: " << newPath << std::endl;
+
+            float score = blankPathScore.at(*iterBlank) * prob[i];
             updateSymbolPath.insert(newPath);
             updateSymbolPathScore[newPath] = score;
         }
     }
+
+    std::cout << "entering extendWithSymbol symbol part......" << std::endl;
 
     set<string>::iterator iterSymbol;
     for (iterSymbol=path.begin(); iterSymbol!=path.end(); iterSymbol++){
@@ -175,7 +242,7 @@ void CTCBeamSearch::extendWithSymbol(float* prob){
                 newPath = *iterSymbol + vocab.at(i);
             }
 
-            float score = pathScore.at(newPath) * prob[i];
+            float score = pathScore.at(*iterSymbol) * prob[i];
             if(updateSymbolPath.find(newPath) != updateSymbolPath.end()){
                 updateSymbolPathScore[newPath] += score;
             }else{
@@ -186,11 +253,13 @@ void CTCBeamSearch::extendWithSymbol(float* prob){
     }
 
     // update pathScore, path
-    pathScore = updateSymbolPathScore;
-    path = updateSymbolPath;
+    // pathScore = updateSymbolPathScore;
+    // path = updateSymbolPath;
 }
 
 void CTCBeamSearch::mergeIdenticalPaths(){
+    std::cout << "entering mergeIdenticalPaths......" << std::endl;
+
     set<string>::iterator iterSymbol;
     for (iterSymbol=path.begin(); iterSymbol!=path.end(); iterSymbol++){
         finalPathScore[*iterSymbol] = pathScore[*iterSymbol];
