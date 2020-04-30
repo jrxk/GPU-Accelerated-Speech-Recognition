@@ -228,7 +228,7 @@ private:
 	}
 };
 
-
+void printMatrixInfo(cuMatrix<float>* mat);
 /*matrix multiply*/
 /*z = x * y*/
 void matrixMul   (cuMatrix<float>* x, cuMatrix<float>*y, cuMatrix<float>*z);
