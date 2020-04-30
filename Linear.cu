@@ -2,7 +2,7 @@
 
 __global__ void ReLU(float* data, float* bias, int height, int width) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i > height * width) return;
+    if (i >= height * width) return;
     
     int j = i % width;
     data[i] += bias[j];

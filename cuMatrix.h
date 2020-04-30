@@ -30,7 +30,7 @@ public:
 	* from another matrix (plus offset), and define our own rows, cols etc.
 	* useful for RNN.
 	*/
-	cuMatrix(cuMatrix<T>* other, int offset, int _n,int _m, int _c):rows(_n), cols(_m), channels(_c), isShallow(false){
+	cuMatrix(cuMatrix<T>* other, int offset, int _n,int _m, int _c):rows(_n), cols(_m), channels(_c), isShallow(true){
 		if (other->hostData == NULL || other->devData == NULL) {
 			printf("Error: offset constructor from uninitialized matrix");
 			hostData = NULL;

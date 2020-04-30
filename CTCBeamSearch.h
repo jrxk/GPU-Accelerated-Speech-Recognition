@@ -3,7 +3,7 @@
 #include <set> 
 
 #include "cuMatrix.h"
-#include "CTCNode.h"
+// #include "CTCNode.h"
 
 using namespace std;
 
