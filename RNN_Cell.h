@@ -5,16 +5,16 @@ class RNN_Cell
 public:
     RNN_Cell(int batch_size, int input_size, int hidden_size): batch_size(batch_size), input_size(input_size), hidden_size(hidden_size) {
         initRandom();
-        outputs = new cuMatrix<float>(batch_size, hidden_size, 1);
+        // outputs = new cuMatrix<float>(batch_size, hidden_size, 1);
         hh_outputs = new cuMatrix<float>(batch_size, hidden_size, 1);
         ih_outputs = new cuMatrix<float>(batch_size, hidden_size, 1);
-        outputs->toGpu();
+        // outputs->toGpu();
         hh_outputs->toGpu();
         ih_outputs->toGpu();
     }
 
     void initRandom();
-    cuMatrix<float>* forward(cuMatrix<float>* inputs, cuMatrix<float>* pre_hidden);
+    cuMatrix<float>* forward(cuMatrix<float>* inputs, cuMatrix<float>* pre_hidden, cuMatrix<float>* outputs);
 
 private:
     cuMatrix<float>* w_ih; // input_size * hidden_size
@@ -24,7 +24,7 @@ private:
     // Or can we only use 1 bias (same bias for 2 parts)?
     // Or We can concat input and pre_hidden, just using one weight?
 
-    cuMatrix<float>* outputs; // batch_size * hidden_size
+    // cuMatrix<float>* outputs; // batch_size * hidden_size
     
     //Are these 2 necessary?
     cuMatrix<float>* hh_outputs;

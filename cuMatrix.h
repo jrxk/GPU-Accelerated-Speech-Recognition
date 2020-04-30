@@ -26,6 +26,25 @@ public:
 	cuMatrix(int _n,int _m, int _c):rows(_n), cols(_m), channels(_c), hostData(NULL), devData(NULL), isShallow(false){
 	}
 
+	/*matrix "slicing". construct a matrix object with data pointers.
+	* from another matrix (plus offset), and define our own rows, cols etc.
+	* useful for RNN.
+	*/
+	cuMatrix(cuMatrix<T>* other, int offset, int _n,int _m, int _c):rows(_n), cols(_m), channels(_c), isShallow(false){
+		if (other->hostData == NULL || other->devData == NULL) {
+			printf("Error: offset constructor from uninitialized matrix");
+			hostData = NULL;
+			devData = NULL;
+		} else if (offset + _n * _m * _c > other->getLen()) {
+			printf("Error: offset constructor out of bound");
+			hostData = NULL;
+			devData = NULL;
+		} else {
+			hostData = other->hostData + offset;
+			devData = other->devData + offset;
+		}
+	}
+
 	cuMatrix(int _n, int _m, int _c, T* hostPtr, T* devPtr):rows(_n), cols(_m), channels(_c), hostData(hostPtr), devData(devPtr), isShallow(true) {
 	}
 
@@ -139,6 +158,16 @@ public:
 	/*get rows * cols*/
 	int getArea(){
 		return rows * cols;
+	}
+
+	/*get rows*/
+	int getRows(){
+		return rows;
+	}
+
+	/*get cols*/
+	int getCols(){
+		return cols;
 	}
 
 	T  *& getHost(){
