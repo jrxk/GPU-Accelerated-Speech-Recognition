@@ -10,24 +10,21 @@ using namespace std;
 class CTCBeamSearch 
 {
     const vector<string> &vocab; // vocab should include blank
-    // const std::vector<std::vector<double>> &probs_seq;
     int beamWidth;
     int blankID;
     int vocabSize;
     map<string, float> pathScore;
-    map<string, float> blankPathScore;
-    map<string, float> finalPathScore;
     set<string> path;
-    set<string> blankPath;
 
     // intermiate result
-    map<string, float> updateBlankPathScore;
-    set<string> updateBlankPath;
-    map<string, float> updateSymbolPathScore;
-    set<string> updateSymbolPath;
+    map<string, float> updatePathScore;
+    set<string> updatePath;
+
+    map<string, float> finalPathScore;
+    set<string> finalPath;
+
 
 public:
-    
   CTCBeamSearch(const vector<string> &vocab, int beamWidth, int blankID):vocab(vocab), beamWidth(beamWidth), blankID(blankID){
       vocabSize = vocab.size();
   };
@@ -37,8 +34,7 @@ public:
 
   void initialPath(float* prob); 
   void prune();
-  void extendWithBlank(float* prob);
-  void extendWithSymbol(float* prob);
+  void extend(float* prob);
   void mergeIdenticalPaths();
 
 };

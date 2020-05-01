@@ -43,7 +43,7 @@ int main() {
     cuMatrix<float>* out = mlp6->forward(x5);
 
     // test CTC
-    string v[] = {"","a", "b", "c"};
+    string v[] = {"$","a", "b", "c"}; // blank in the vocab must be a special symbol
     int vocabsize = 4;
     float test[] = {0.36225085, 0.09518672, 0.08850375, 0.45405867,
                     0.08869431, 0.18445025, 0.3304224,  0.39643304,
