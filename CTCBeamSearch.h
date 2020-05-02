@@ -48,6 +48,8 @@ class CTCBeamSearch
     // float* nextProbs;
 
     int* pathHashes; // vocabSize * beamWidth
+    int* differentPathTest;
+    float* mergedProbs;
     int numPaths;
 
 
@@ -74,6 +76,8 @@ public:
       beamStateBuffer = NULL;
       nextBeamStateBuffer = NULL;
       pathHashes = NULL;
+      differentPathTest = NULL;
+      mergedProbs = NULL;
   };
 
   void setup();
@@ -85,6 +89,7 @@ public:
   void initialPath(float* prob); 
   void prune();
   void extend(float* prob);
+  void extendAndPrune(float* prob, bool isLastStep);
   void mergeIdenticalPaths();
 
 };
