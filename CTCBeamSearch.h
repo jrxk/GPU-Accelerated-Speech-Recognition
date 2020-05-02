@@ -11,7 +11,7 @@ struct BeamState
 {
   float prob;
   int len;
-  char[DECODE_MAX_LEN] path;
+  char path[DECODE_MAX_LEN];
 };
 
 class CTCBeamSearch 
@@ -65,7 +65,7 @@ public:
   //     }
   // };
 
-  CTCBeamSearch(const char* vocab, int vocabSize, int beamWidth, int blankID):
+  CTCBeamSearch(char* vocab, int vocabSize, int beamWidth, int blankID):
     vocab(vocab), vocabSize(vocabSize), beamWidth(beamWidth), blankID(blankID) {
       this->vocab = new char[vocabSize];
       memcpy(this->vocab, vocab, vocabSize * sizeof(char));
@@ -77,6 +77,7 @@ public:
   };
 
   void setup();
+
 
   string decode(cuMatrix<float>* seqProb); // assume prob is [seq,vocab] for now (no batch)
   void helper();
