@@ -74,7 +74,7 @@ void CTCBeamSearch::setup() {
     error = cudaMalloc(&nextBeamStateBuffer, beamWidth * vocabSize * sizeof(BeamState));
     error = cudaMalloc(&pathHashes, beamWidth * vocabSize * sizeof(int));
     if (error != cudaSuccess) {
-      fprintf(stderr,"cudaError: %s\n", cudaGetErrorString(error));
+        fprintf(stderr,"cudaError: %s %s %d\n", cudaGetErrorString(error), __FILE__, __LINE__);
     }
 }
 
@@ -117,6 +117,7 @@ void CTCBeamSearch::helper(){
 }
 
 string CTCBeamSearch::decode(cuMatrix<float>* seqProb){
+    setup();
     // get time step
     int timestep = seqProb->getRows();
     // check vocab size
@@ -128,12 +129,12 @@ string CTCBeamSearch::decode(cuMatrix<float>* seqProb){
     // initial path at time t = 1
     float* initRow = seqProb->getDev();
 
-    initialPath(getRowData(seqProb->getHost(), 0, vocabSize));
+    initialPath(getRowDataDev(seqProb->getDev(), 0, vocabSize));
     // initialPath(getRowData(seqProb->getDev(), 0, vocabSize));
 
     // iterate through timestep
     for (int t = 1; t < timestep; t++){
-        float* prob = getRowData(seqProb->getHost(), t, vocabSize);
+        float* prob = getRowDataDev(seqProb->getDev(), t, vocabSize);
         extend(prob);
         // path = updatePath;
         // pathScore = updatePathScore;
@@ -158,18 +159,21 @@ string CTCBeamSearch::decode(cuMatrix<float>* seqProb){
 
 void CTCBeamSearch::initialPath(float* prob){
     int s = 1;
+    BeamState* initialStates[vocabSize];
+    cudaError_t error;
     for (int i = 0; i < vocabSize; i++){
-        // paths[i][0] = vocab[i];
-        // pathLens[i] = 1;
-        cudaMemset(&(beamStateBuffer[i].path), this->vocab[i], sizeof(char));
-        cudaMemcpy(&(beamStateBuffer[i].prob), &(prob[i]), sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(&(beamStateBuffer[i].len), &s, sizeof(int), cudaMemcpyHostToDevice);
+        error = cudaMemset(&(beamStateBuffer[i].path), this->vocab[i], sizeof(char));
+        error = cudaMemcpy(&(beamStateBuffer[i].prob), &(prob[i]), sizeof(float), cudaMemcpyHostToDevice);
+        error = cudaMemcpy(&(beamStateBuffer[i].len), &s, sizeof(int), cudaMemcpyHostToDevice);
+        initialStates[i] = beamStateBuffer + i;
     }
-    // cudaMemcpy(this->probs, prob, vocabSize * sizeof(float), cudaMemcpyDeviceToDevice);
+    error = cudaMemcpy(beamStates, &initialStates, vocabSize * sizeof(BeamState*), cudaMemcpyHostToDevice);
     
     numPaths = vocabSize;
-    cudaMemcpyToSymbol(cuNumPaths, &numPaths, sizeof(int));
-
+    error = cudaMemcpyToSymbol(cuNumPaths, &numPaths, sizeof(int));
+    if (error != cudaSuccess) {
+        fprintf(stderr,"cudaError: %s %s %d\n", cudaGetErrorString(error), __FILE__, __LINE__);
+    }
     // prune();
 }
 
@@ -216,10 +220,10 @@ __global__ void kernelGenNextPaths(float* vocabProbs, BeamState** beamStates,
     // nextProbs[pid] = probs[pid] * vocabProbs[vi];
 
     BeamState* newBeamState = &(nextBeamStateBuffer[pid]);
-    BeamState* oldBeamState = beamStates[pid];
+    BeamState* oldBeamState = beamStates[pi];
     nextBeamStates[pid] = newBeamState;
     char* newPath = newBeamState->path; // Why not the address???
-    printf("%p %p\n", newBeamState, newBeamState->path);
+    // printf("%p %p\n", newBeamState, newBeamState->path);    
     char* oldPath = oldBeamState->path;
     memcpy(newPath, oldPath, DECODE_MAX_LEN * sizeof(char));
     newBeamState->prob = oldBeamState->prob * vocabProbs[vi];
@@ -252,12 +256,15 @@ void CTCBeamSearch::extend(float* vocabProbs){
     // updatePathScore.clear();
     // updatePath.clear();
     // Assume: cudaMalloc initialize memory to zero
-    cudaMemset(nextBeamStateBuffer, 0, vocabSize * beamWidth * sizeof(BeamState));
-    cudaMemset(nextBeamStates, 0, vocabSize * beamWidth * sizeof(BeamState*));
+    cudaError_t error;
+    error = cudaMemset(nextBeamStateBuffer, 0, vocabSize * beamWidth * sizeof(BeamState));
+    error = cudaMemset(nextBeamStates, 0, vocabSize * beamWidth * sizeof(BeamState*));
+    if (error != cudaSuccess) {
+        fprintf(stderr,"cudaError: %s %s %d\n", cudaGetErrorString(error), __FILE__, __LINE__);
+    }
     // kernel
     int blockDim = 256;
     int numBlocks = (numPaths * vocabSize + blockDim - 1) / blockDim;
-    printf("hello\n");
     kernelGenNextPaths<<<numBlocks, blockDim>>>(vocabProbs, beamStates, 
         nextBeamStates, beamStateBuffer, nextBeamStateBuffer, pathHashes);
     cudaDeviceSynchronize();
