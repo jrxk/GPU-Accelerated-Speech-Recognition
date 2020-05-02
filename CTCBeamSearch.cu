@@ -67,14 +67,11 @@ void CTCBeamSearch::setup() {
     cudaMemcpyToSymbol(cuConstParams, &params, sizeof(GlobalConstants));
 
     // allocate buffers
-    cudaError_t error = cudaMalloc(&paths, beamWidth * vocabSize * sizeof(char*));
-    error = cudaMalloc(&nextPaths, beamWidth * vocabSize * sizeof(char*));
-    error = cudaMalloc(&pathBuffer, beamWidth * vocabSize * decodeMaxLen * sizeof(char));
-    error = cudaMalloc(&nextPathBuffer, beamWidth * vocabSize * decodeMaxLen * sizeof(char));
-    error = cudaMalloc(&pathLens, beamWidth * vocabSize * sizeof(int));
-    error = cudaMalloc(&nextPathLens, beamWidth * vocabSize * sizeof(int));
-    error = cudaMalloc(&probs, beamWidth * vocabSize * sizeof(float));
-    error = cudaMalloc(&nextProbs, beamWidth * vocabSize * sizeof(float));
+    cudaError_t error;
+    error = cudaMalloc(&beamStates, beamWidth * vocabSize * sizeof(BeamState*));
+    error = cudaMalloc(&nextBeamStates, beamWidth * vocabSize * sizeof(BeamState*));
+    error = cudaMalloc(&beamStateBuffer, beamWidth * vocabSize * sizeof(BeamState));
+    error = cudaMalloc(&nextBeamStateBuffer, beamWidth * vocabSize * sizeof(BeamState));
     error = cudaMalloc(&pathHashes, beamWidth * vocabSize * sizeof(int));
     if (error != cudaSuccess) {
       fprintf(stderr,"cudaError: %s\n", cudaGetErrorString(code));
@@ -163,10 +160,11 @@ void CTCBeamSearch::initialPath(float* prob){
     for (int i = 0; i < vocabSize; i++){
         // paths[i][0] = vocab[i];
         // pathLens[i] = 1;
-        cudaMemset(paths[i], this->vocab[i], sizeof(char));
-        cudaMemcpy(&(pathLens[i]), &s, sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemset(&(beamStateBuffer[i].path), this->vocab[i], sizeof(char));
+        cudaMemcpy(&(beamStateBuffer[i].prob), &(prob[i]), sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(&(beamStateBuffer[i].len), &s, sizeof(int), cudaMemcpyHostToDevice);
     }
-    cudaMemcpy(this->probs, prob, vocabSize * sizeof(float), cudaMemcpyDeviceToDevice);
+    // cudaMemcpy(this->probs, prob, vocabSize * sizeof(float), cudaMemcpyDeviceToDevice);
     
     numPaths = vocabSize;
     cudaMemcpyToSymbol(cuNumPaths, numPaths, sizeof(int));
@@ -201,19 +199,13 @@ void CTCBeamSearch::extend(float* vocabProbs){
     // updatePathScore.clear();
     // updatePath.clear();
     // Assume: cudaMalloc initialize memory to zero
-    // for (int i = 0; i < vocabSize * beamWidth && nextPaths[i] != NULL; i++) {
-    //     cudaFree(nextPaths[i]);
-    //     nextPaths[i] = NULL;
-    // }
-    cudaMemset(nextPaths, 0, vocabSize * beamWidth * sizeof(char*));
-    cudaMemset(nextPathBuffer, 0, vocabSize * beamWidth * decodeMaxLen * sizeof(char));
-    cudaMemset(nextPathLens, 0, vocabSize * beamWidth * sizeof(int));
-    cudaMemset(nextProbs, 0, vocabSize * beamWidth * sizeof(float));
+    cudaMemset(nextBeamStateBuffer, 0, vocabSize * beamWidth * sizeof(BeamState));
+    cudaMemset(nextBeamStates, 0, vocabSize * beamWidth * sizeof(BeamState*));
     // kernel
     int blockDim = 256;
     int numBlocks = (numPaths * vocabSize + blockDim - 1) / blockDim;
-    kernelGenNextPaths<<<numBlocks, blockDim>>>(vocabProbs, paths, nextPaths, pathBuffer, 
-            nextPathBuffer, pathLens, nextPathLens, probs, nextProbs);
+    kernelGenNextPaths<<<numBlocks, blockDim>>>(vocabProbs, beamStates, 
+        nextBeamStates, beamStateBuffer, nextBeamStateBuffer);
     
 
     // set<string>::iterator iter;
@@ -262,7 +254,8 @@ void CTCBeamSearch::extend(float* vocabProbs){
 }
 
 // TODO: handle length exceeding max len
-__global__ void kernelGenNextPaths(float* vocabProbs, char** paths, char** nextPaths, char* pathBuffer, char* nextPathBuffer, int* pathLens, int* nextPathLens, float* probs, float* nextProbs) {
+__global__ void kernelGenNextPaths(float* vocabProbs, BeamState** beamStates, 
+    BeamState** nextBeamStates, BeamState* beamStateBuffer, BeamState* nextBeamStateBuffer) {
     int pid = blockIdx.x * blockDim.x + threadIdx.x;
     int vocabSize = cuConstParams.vocabSize;
     int beamWidth = cuConstParams.beamWidth;
@@ -274,33 +267,41 @@ __global__ void kernelGenNextPaths(float* vocabProbs, char** paths, char** nextP
     int pi = pid / vocabSize;
     int vi = pid % vocabSize;
 
-    char* newPath = nextPathBuffer + decodeMaxLen * pid;
-    nextPaths[pid] = newPath;
-    cudaMemcpy(newPath, paths[pi], decodeMaxLen * sizeof(char), cudaMemcpyDeviceToDevice);
-    nextProbs[pid] = probs[pid] * vocabProbs[vi];
+    // char* newPath = nextPathBuffer + decodeMaxLen * pid;
+    // nextPaths[pid] = newPath;
+    // cudaMemcpy(newPath, paths[pi], decodeMaxLen * sizeof(char), cudaMemcpyDeviceToDevice);
+    // nextProbs[pid] = probs[pid] * vocabProbs[vi];
+
+    BeamState* newBeamState = &(nextBeamStateBuffer[pid]);
+    BeamState* oldBeamState = beamStates[pid];
+    nextBeamStates[pid] = newBeamState;
+    char* newPath = &(newBeamState->path);
+    char* oldPath = &(oldBeamState->path);
+    cudaMemcpy(newPath, oldPath, DECODE_MAX_LEN * sizeof(char), cudaMemcpyDeviceToDevice);
+    newBeamState->prob = oldBeamState->prob * vocabProbs[vi];
     // extend with blank
     if (vi == blankID) {
         // path last char is blank
-        if (paths[pi][pathLens[pi]-1] == vocab[blankID]) {
-            nextPathLens[pid] = pathLens[pid];
+        if (oldPath[oldBeamState->len-1] == vocab[blankID]) {
+            newBeamState->len = oldBeamState->len;
         } else {
-            nextPathLens[pid] = pathLens[pid] + 1;
-            newPath[nextPathLens[pid]-1] = vocab[vi]; // append new char
+            newBeamState->len = oldBeamState->len + 1;
+            newPath[newBeamState->len-1] = vocab[vi]; // append new blank
         }
     } else {
-        if (paths[pi][pathLens[pi]-1] == vocab[blankID]) {
-            nextPathLens[pid] = pathLens[pid];
-            newPath[nextPathLens[pid]-1] = vocab[vi]; // replace last blank with new char
+        if (oldPath[oldBeamState->len-1] == vocab[blankID]) {
+            newBeamState->len = oldBeamState->len;
+            newPath[newBeamState->len-1] = vocab[vi]; // replace last blank with new char
         } else {
-            if (paths[pi][pathLens[pi]-1] == vocab[vi]) {
-                nextPathLens[pid] = pathLens[pid];
+            if (oldPath[oldBeamState->len-1] == vocab[vi]) {
+                newBeamState->len = oldBeamState->len;
             } else {
-                nextPathLens[pid] = pathLens[pid] + 1;
-                newPath[nextPathLens[pid]-1] = vocab[vi]; // append new char
+                newBeamState->len = oldBeamState->len + 1;
+                newPath[newBeamState->len-1] = vocab[vi]; // append new char
             }
         }
     }
-    genHashCode(newPath, newPathLens[pid], pathHashes[pid]);
+    genHashCode(newPath, newBeamState->len, &(pathHashes[pid]));
 }
 
 

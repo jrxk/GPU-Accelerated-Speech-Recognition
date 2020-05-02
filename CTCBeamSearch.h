@@ -4,8 +4,15 @@
 
 #include "cuMatrix.h"
 // #include "CTCNode.h"
-
+#define DECODE_MAX_LEN 256
 using namespace std;
+
+struct BeamState
+{
+  float prob;
+  int len;
+  char[DECODE_MAX_LEN] path;
+};
 
 class CTCBeamSearch 
 {
@@ -13,7 +20,7 @@ class CTCBeamSearch
     int beamWidth;
     int blankID;
     int vocabSize;
-    int decodeMaxLen;
+    // int decodeMaxLen;
     map<string, float> pathScore;
     set<string> path;
 
@@ -24,17 +31,21 @@ class CTCBeamSearch
     map<string, float> finalPathScore;
     set<string> finalPath;
 
-    char** paths;
-    char** nextPaths;
+    // Sort the pointers, not the struct itself
+    BeamState** beamStates;
+    BeamState** nextBeamStates;
 
-    char* pathBuffer; // vocabSize * beamWidth * decodeMaxLen
-    char* nextPathBuffer;
+    BeamState* beamStateBuffer;
+    BeamState* nextBeamStateBuffer;
 
-    int* pathLens; // vocabSize * beamWidth
-    int* nextPathLens;
+    // char* pathBuffer; // vocabSize * beamWidth * decodeMaxLen
+    // char* nextPathBuffer;
 
-    float* probs; // vocabSize * beamWidth
-    float* nextProbs;
+    // int* pathLens; // vocabSize * beamWidth
+    // int* nextPathLens;
+
+    // float* probs; // vocabSize * beamWidth
+    // float* nextProbs;
 
     int* pathHashes; // vocabSize * beamWidth
     int numPaths;
@@ -54,17 +65,14 @@ public:
   //     }
   // };
 
-  CTCBeamSearch(const char* vocab, int vocabSize, int beamWidth, int blankID, int decodeMaxLen):vocab(vocab), vocabSize(vocabSize), beamWidth(beamWidth), blankID(blankID), decodeMaxLen(decodeMaxLen){
+  CTCBeamSearch(const char* vocab, int vocabSize, int beamWidth, int blankID):
+    vocab(vocab), vocabSize(vocabSize), beamWidth(beamWidth), blankID(blankID) {
       this->vocab = new char[vocabSize];
       memcpy(this->vocab, vocab, vocabSize * sizeof(char));
-      paths = NULL;
-      nextPaths = NULL;
-      pathBuffer = NULL;
-      nextPathBuffer = NULL;
-      pathLens = NULL;
-      nextPathLens = NULL;
-      probs = NULL;
-      nextProbs = NULL;
+      beamStates = NULL;
+      nextBeamStates = NULL;
+      beamStateBuffer = NULL;
+      nextBeamStateBuffer = NULL;
       pathHashes = NULL;
   };
 
