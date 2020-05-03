@@ -89,14 +89,20 @@ public:
 
   void setup(int batchSize);
 
-
   string decode(cuMatrix<float>* seqProb, int timestep, int batchSize); // assume prob is [seq,vocab] for now (no batch)
+  
   void helper();
 
   void initialPath(float* prob, int batchSize); 
+  
+  void batchSortByProb(float* batchProb, BeamState** beamStates, int* sortIdx, int* sortSegment, int batchSize);
+
   void prune();
-  void extend(float* prob);
+  
+  // void extend(float* prob);
+  
   void extendAndPrune(float* prob, bool isLastStep);
+  
   void mergeIdenticalPaths();
 
 };
