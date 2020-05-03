@@ -38,10 +38,43 @@ float* getRowData(float* data, int row, int length){
 }
 
 float* getRowDataDev(float* devData, int row, int length) {
-    // float* ret;
-    // cudaError_t error = cudaMalloc(&ret, length*sizeof(float));
-    // cudaMemcpy(ret, data+row*length, length*sizeof(float), cudaMemcpyHostToDevice);
     return devData + row * length;
+}
+
+void printMap (map<string, float> dict){
+    for(map<string, float >::const_iterator it = dict.begin(); it != dict.end(); ++it)
+    {
+        std::cout << it->first << "," << it->second << ";";
+    }
+
+    std::cout<<endl;
+}
+
+void printSet (set<string> myset){
+    std::set<std::string>::iterator it = myset.begin();
+    while (it != myset.end())
+    {
+        std::cout << (*it) << ",";
+        it++;
+    }
+    std::cout<<endl;
+}
+
+void printVector (vector<float> vec){
+    std::vector<float>::iterator it = vec.begin();
+    while (it != vec.end())
+    {
+        std::cout << (*it) << ",";
+        it++;
+    }
+    std::cout<<endl;
+}
+
+void CTCBeamSearch::helper(){
+    std::cout << "======print path======" << std::endl;
+    printSet(path);
+    std::cout << "======print pathScore======" << std::endl;
+    printMap(pathScore);
 }
 
 // Setup
@@ -83,43 +116,7 @@ void CTCBeamSearch::setup() {
     }
 }
 
-
-
-void printMap (map<string, float> dict){
-    for(map<string, float >::const_iterator it = dict.begin(); it != dict.end(); ++it)
-    {
-        std::cout << it->first << "," << it->second << ";";
-    }
-
-    std::cout<<endl;
-}
-
-void printSet (set<string> myset){
-    std::set<std::string>::iterator it = myset.begin();
-    while (it != myset.end())
-    {
-        std::cout << (*it) << ",";
-        it++;
-    }
-    std::cout<<endl;
-}
-
-void printVector (vector<float> vec){
-    std::vector<float>::iterator it = vec.begin();
-    while (it != vec.end())
-    {
-        std::cout << (*it) << ",";
-        it++;
-    }
-    std::cout<<endl;
-}
-
-void CTCBeamSearch::helper(){
-    std::cout << "======print path======" << std::endl;
-    printSet(path);
-    std::cout << "======print pathScore======" << std::endl;
-    printMap(pathScore);
-}
+// Decode
 
 string CTCBeamSearch::decode(cuMatrix<float>* seqProb){
     setup();
@@ -141,18 +138,7 @@ string CTCBeamSearch::decode(cuMatrix<float>* seqProb){
         float* prob = getRowDataDev(seqProb->getDev(), t, vocabSize);
         extendAndPrune(prob, t == timestep - 1);
     }
-    // // get best path
-    // using pair_type=std::pair<string,float>; 
-    // auto bestPath = std::max_element
-    // (
-    //     std::begin(finalPathScore), std::end(finalPathScore),
-    //     [] (const pair_type & p1, const pair_type & p2) {
-    //         return p1.second < p2.second;
-    //     }
-    // );
 
-    // return bestPath->first;
-    // char* best = new char[DECODE_MAX_LEN];
     char best[DECODE_MAX_LEN];
     BeamState* bestState;
     cudaMemcpy(&bestState, beamStates, sizeof(BeamState*), cudaMemcpyDeviceToHost);
@@ -202,11 +188,6 @@ __global__ void kernelGenNextPaths(float* vocabProbs, BeamState** beamStates,
     int pi = pid / vocabSize;
     int vi = pid % vocabSize;
 
-    // char* newPath = nextPathBuffer + decodeMaxLen * pid;
-    // nextPaths[pid] = newPath;
-    // cudaMemcpy(newPath, paths[pi], decodeMaxLen * sizeof(char), cudaMemcpyDeviceToDevice);
-    // nextProbs[pid] = probs[pid] * vocabProbs[vi];
-
     BeamState* newBeamState = &(nextBeamStateBuffer[pid]);
     BeamState* oldBeamState = beamStates[pi];
     nextBeamStates[pid] = newBeamState;
@@ -251,7 +232,7 @@ __global__ void kernelTestDifferentPaths(int* pathHashes, int* differentPathTest
 }
 
 __global__ void kernelkernel(float* a1, BeamState** a2) {
-
+    // for cuda-gdb
 }
 
 __global__ void kernelMergeSamePaths(int* differentPathTest, BeamState** dest, BeamState** src, float* mergedProbs, int numPaths) {
@@ -272,33 +253,32 @@ void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep){
     // Assume: cudaMalloc initialize memory to zero
     cudaError_t error;
     error = cudaMemset(mergedProbs, 0, vocabSize * beamWidth * sizeof(float));
-    // kernel
+    // generate all possible new paths (numPaths * vocabSize)
     int blockDim = 256;
     int numBlocks = (numPaths * vocabSize + blockDim - 1) / blockDim;
     kernelGenNextPaths<<<numBlocks, blockDim>>>(vocabProbs, beamStates, 
         nextBeamStates, beamStateBuffer, nextBeamStateBuffer, pathHashes, numPaths, isLastStep);
     
-    // cudaDeviceSynchronize(); // ?
-    
+    // cudaDeviceSynchronize();
+
+    // sort by hash to group identical paths
     numPaths = numPaths * vocabSize;
     thrust::sort_by_key(thrust::device, pathHashes, pathHashes + numPaths, nextBeamStates);
-
+    // test + scan to get index in merged array (unique paths)
     numBlocks = (numPaths * vocabSize + blockDim - 1) / blockDim;
     kernelTestDifferentPaths<<<numBlocks, blockDim>>>(pathHashes, differentPathTest, numPaths);
-    
     thrust::inclusive_scan(thrust::device, differentPathTest, differentPathTest + numPaths, differentPathTest);
-    
+    // merge the probabilities of identical paths
     error = cudaMemset(beamStates, 0, vocabSize * beamWidth * sizeof(BeamState*));
     kernelMergeSamePaths<<<numBlocks, blockDim>>>(differentPathTest, beamStates, nextBeamStates, mergedProbs, numPaths);
-    
+    // sort by probability
     error = cudaMemcpy(&numPaths, (void *) (differentPathTest + numPaths - 1), sizeof(int), cudaMemcpyDeviceToHost);
     thrust::sort_by_key(thrust::device, mergedProbs, mergedProbs + numPaths, beamStates, thrust::greater<float>());
-    
+    // prune
     numPaths = beamWidth > numPaths ? numPaths : beamWidth;
+    // write merged probablities back to BeamState
     numBlocks = (numPaths * vocabSize + blockDim - 1) / blockDim;
     kernelWriteMergedProbs<<<numBlocks, blockDim>>>(mergedProbs, beamStates, numPaths);
-
-    // kernelkernel<<<1,1>>>(mergedProbs, beamStates);
 
     // std::swap(beamStates, nextBeamStates);
     std::swap(beamStateBuffer, nextBeamStateBuffer);
