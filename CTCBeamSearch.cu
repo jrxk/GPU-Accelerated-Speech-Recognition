@@ -139,11 +139,16 @@ string CTCBeamSearch::decode(cuMatrix<float>* seqProb){
         extendAndPrune(prob, t == timestep - 1);
     }
 
+    int bestLen;
     char best[DECODE_MAX_LEN];
     BeamState* bestState;
     cudaMemcpy(&bestState, beamStates, sizeof(BeamState*), cudaMemcpyDeviceToHost);
-    cudaMemcpy(best, bestState->path, DECODE_MAX_LEN, cudaMemcpyDeviceToHost);
-    string best_string = best;
+    cudaMemcpy(&bestLen, &(bestState->len), sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(best, bestState->path, bestLen, cudaMemcpyDeviceToHost);
+    string best_string = string(best, bestLen);
+    float bestScore;
+    cudaMemcpy(&bestScore, &(bestState->prob), sizeof(float), cudaMemcpyDeviceToHost);
+    std::cout << "Best Score: " << bestScore << std::endl; 
     return best_string;
 }
 

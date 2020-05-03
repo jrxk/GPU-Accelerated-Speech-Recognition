@@ -56,7 +56,7 @@ int main() {
                     0.37673064, 0.13478024, 0.2735787,  0.21491042,
                     0.34790623, 0.04654182, 0.34069546, 0.26485648}; 
     // vector<string> vocab (v, v + sizeof(v) / sizeof(string) );
-    CTCBeamSearch* decoder = new CTCBeamSearch(vocab, vocabsize, 2, 0);
+    CTCBeamSearch* decoder = new CTCBeamSearch(vocab, vocabsize, 100000, 0);
     cuMatrix<float>* seqProb = new cuMatrix<float>(10, 4, 1);
     for(int j = 0; j < seqProb->getLen(); j++){
         seqProb->getHost()[j] =  test[j];
