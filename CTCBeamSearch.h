@@ -51,6 +51,7 @@ class CTCBeamSearch
     int* pathHashes; // vocabSize * beamWidth
     int* pathHashesScratch;
     int* differentPathTest;
+    int* differentPathTestBuffer;
     
     float* mergedProbs;
     float* mergedProbsScratch; // scratch for thrust::gather
@@ -91,6 +92,7 @@ public:
       pathHashes = NULL;
       pathHashesScratch = NULL;
       differentPathTest = NULL;
+      differentPathTestBuffer = NULL;
       mergedProbs = NULL;
       batchNumPaths = NULL;
       sortIdx = NULL;
@@ -102,7 +104,7 @@ public:
 
   void setup(int batchSize);
 
-  string decode(cuMatrix<float>* seqProb, int timestep, int batchSize); // assume prob is [seq,vocab] for now (no batch)
+  vector<pair<string, float>> decode(cuMatrix<float>* seqProb, int timestep, int batchSize); // assume prob is [seq,vocab] for now (no batch)
   
   void helper();
 
