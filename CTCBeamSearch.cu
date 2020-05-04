@@ -81,7 +81,7 @@ struct GlobalConstants {
 
 __constant__ GlobalConstants cuConstParams;
 // __device__ int cuNumPaths;
-__global__ void kernelkernel(int* num, int* diff) {
+__global__ void kernelkernel(float* prob, BeamState** state, int* num) {
     // for cuda-gdb
 }
 
@@ -103,11 +103,12 @@ __global__ void kernelGenerateSegment(int* segment, int size, int stride) {
 __global__ void kernelUpdateNumPathsPrune(int* batchNumPaths){
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     int batchSize = cuConstParams.batchSize;
-    int vocabSize = cuConstParams.vocabSize;
+    // int vocabSize = cuConstParams.vocabSize;
     int beamWidth = cuConstParams.beamWidth;
     if (id >= batchSize) return;
     
-    batchNumPaths[id] = beamWidth > vocabSize ? vocabSize : beamWidth;
+    // batchNumPaths[id] = beamWidth > vocabSize ? vocabSize : beamWidth;
+    batchNumPaths[id] = beamWidth > batchNumPaths[id] ? batchNumPaths[id] : beamWidth;
 }
 
 __global__ void kernelUpdateNumPathsExtend(int* batchNumPaths){
@@ -479,13 +480,12 @@ void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep, int batch
     numBlocks = (batchSize + blockDim - 1) / blockDim;
     kernelUpdateNumPathsMerge<<<numBlocks, blockDim>>>(batchNumPaths, differentPathTest);
 
+    // prune
     batchSortbyKey<float>(batchSize, mergedProbs, mergedProbsScratch, beamStates, nextBeamStates);
     kernelUpdateNumPathsPrune<<<numBlocks, blockDim>>>(batchNumPaths);
-    // thrust::sort_by_key(thrust::device, mergedProbs, mergedProbs + numPaths, beamStates, thrust::greater<float>());
-    // numPaths = beamWidth > numPaths ? numPaths : beamWidth;
-    
+
     // write merged probablities back to BeamState
-    numBlocks = (numPaths * vocabSize + blockDim - 1) / blockDim;
+    numBlocks = (batchSize * beamWidth * vocabSize + blockDim - 1) / blockDim;
     kernelWriteMergedProbs<<<numBlocks, blockDim>>>(mergedProbs, beamStates, numPaths);
 
     // std::swap(beamStates, nextBeamStates);
