@@ -81,7 +81,7 @@ struct GlobalConstants {
 
 __constant__ GlobalConstants cuConstParams;
 // __device__ int cuNumPaths;
-__global__ void kernelkernel(int* diff, BeamState** state, float* prob) {
+__global__ void kernelkernel(int* num, int* diff) {
     // for cuda-gdb
 }
 
@@ -117,6 +117,20 @@ __global__ void kernelUpdateNumPathsExtend(int* batchNumPaths){
     if (id >= batchSize) return;
     
     batchNumPaths[id] = batchNumPaths[id] * vocabSize;
+}
+
+__global__ void kernelUpdateNumPathsMerge(int* batchNumPaths, int* differentPathTest){
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+    int batchSize = cuConstParams.batchSize;
+    int vocabSize = cuConstParams.vocabSize;
+    int beamWidth = cuConstParams.beamWidth;
+    if (id >= batchSize) return;
+    // first batch
+    if(id == 0){
+        batchNumPaths[id] = differentPathTest[(id + 1) * vocabSize * beamWidth - 1];
+    }else{
+        batchNumPaths[id] = differentPathTest[(id + 1) * vocabSize * beamWidth - 1] - differentPathTest[id * vocabSize * beamWidth - 1];
+    }
 }
 
 template <class T>
@@ -461,9 +475,11 @@ void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep, int batch
     kernelMergeSamePaths<<<numBlocks, blockDim>>>(differentPathTestBuffer, beamStates, nextBeamStates, mergedProbs, batchNumPaths, batchSize);
     
     // sort by probability
-    error = cudaMemcpy(&numPaths, (void *) (differentPathTest + numPaths - 1), sizeof(int), cudaMemcpyDeviceToHost);
-    batchSortbyKey<float>(batchSize, mergedProbs, mergedProbsScratch, beamStates, nextBeamStates);
+    // error = cudaMemcpy(&numPaths, (void *) (differentPathTest + numPaths - 1), sizeof(int), cudaMemcpyDeviceToHost);
     numBlocks = (batchSize + blockDim - 1) / blockDim;
+    kernelUpdateNumPathsMerge<<<numBlocks, blockDim>>>(batchNumPaths, differentPathTest);
+
+    batchSortbyKey<float>(batchSize, mergedProbs, mergedProbsScratch, beamStates, nextBeamStates);
     kernelUpdateNumPathsPrune<<<numBlocks, blockDim>>>(batchNumPaths);
     // thrust::sort_by_key(thrust::device, mergedProbs, mergedProbs + numPaths, beamStates, thrust::greater<float>());
     // numPaths = beamWidth > numPaths ? numPaths : beamWidth;
