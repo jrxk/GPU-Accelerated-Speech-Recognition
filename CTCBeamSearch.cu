@@ -134,6 +134,43 @@ __global__ void kernelUpdateNumPathsMerge(int* batchNumPaths, int* differentPath
     }
 }
 
+bool __device__ operator<(device_string lhs, device_string rhs ) {
+    char* l = lhs.raw;
+    char* r = rhs.raw;
+
+    for( ; *l && *r && *l==*r; )
+    {
+        ++l;
+        ++r;
+    }
+    return *l < *r;
+}
+
+template <class T>
+void CTCBeamSearch::batchSortbyStr(int batchSize, thrust::device_vector<device_string> dVecStr, T* &key, T* &keyScratch, BeamState** &originalBeamState, BeamState** &bufferBeamState){
+    int blockDim = 256;
+    int numBlocks = (batchSize * beamWidth * vocabSize + blockDim - 1) / blockDim;
+    kernelGenerateSegmentAndIndex<<<numBlocks, blockDim>>>(sortSegment, sortIdx, batchSize * beamWidth * vocabSize, beamWidth * vocabSize);
+    int totalSize = batchSize * beamWidth * vocabSize;
+
+    // keep an original copy of prob
+    // cudaMemcpy(keyScratch, key, totalSize * sizeof(float), cudaMemcpyDeviceToDevice);
+    // sortIdx is mixed decreasing order
+    thrust::stable_sort_by_key(thrust::device, dVecStr.begin(),  dVecStr.end(), sortIdx);
+    // gather segment to get the corresponding segment for each index
+    thrust::gather(thrust::device, sortIdx, sortIdx + totalSize, sortSegment, sortSegmentScratch);
+    std::swap(sortSegment, sortSegmentScratch);
+    // sortIdx is the final order (increasing segment, decreasing prob)
+    thrust::stable_sort_by_key(thrust::device, sortSegment, sortSegment + totalSize, sortIdx, thrust::less<int>());
+    // gather prob by the final order
+    thrust::gather(thrust::device, sortIdx, sortIdx + totalSize, key, keyScratch);
+    std::swap(key, keyScratch);
+    // gather beam states by the final order
+    thrust::gather(thrust::device, sortIdx, sortIdx + totalSize, originalBeamState, bufferBeamState);
+    std::swap(originalBeamState, bufferBeamState);
+    kernelkernel<<<1,1>>>(NULL, originalBeamState, NULL);
+}
+
 template <class T>
 void CTCBeamSearch::batchSortbyKey(int batchSize, T* &key, T* &keyScratch, BeamState** &originalBeamState, BeamState** &bufferBeamState){
     int blockDim = 256;
@@ -217,6 +254,7 @@ void CTCBeamSearch::setup(int batchSize) {
     if (error != cudaSuccess) {
         fprintf(stderr,"cudaError: %s %s %d\n", cudaGetErrorString(error), __FILE__, __LINE__);
     }
+    // dVecPaths.reserve(batchSize * beamWidth * vocabSize);
 }
 
 // Decode
@@ -466,6 +504,18 @@ __global__ void kernelWriteMergedProbs(float* mergedProbs, BeamState** beamState
     // beamStates[pid]->prob = mergedProbs[pid];
 }
 
+bool __device__ devComp(device_string lhs, device_string rhs ) {
+    char* l = lhs.raw;
+    char* r = rhs.raw;
+
+    for( ; *l && *r && *l==*r; )
+    {
+        ++l;
+        ++r;
+    }
+    return *l < *r;
+}
+
 void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep, int batchSize){
     // Assume: cudaMalloc initialize memory to zero
     cudaError_t error;
@@ -482,15 +532,28 @@ void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep, int batch
     numBlocks = (batchSize + blockDim - 1) / blockDim;
     kernelUpdateNumPathsExtend<<<numBlocks, blockDim>>>(batchNumPaths);
 
-    thrust::sort_by_key(thrust::device, pathHashes, pathHashes + numPaths, nextBeamStates);
-    batchSortbyKey<int>(batchSize, pathHashes, pathHashesScratch, nextBeamStates, beamStates);
-    
+    thrust::device_vector<device_string> d_vec;
+    d_vec.reserve(batchSize * beamWidth * vocabSize);
+    for (int i = 0; i < batchSize * beamWidth * vocabSize; i++) {
+        device_string d_str(((char*) (nextBeamStateBuffer + i) + 8));
+        // auto d_ptr = thrust::device_pointer_cast<BeamState>(beamStateBuffer + i);
+        d_vec.push_back(d_str);
+    }
     // TODO: sort nextBeamStates directly
-    // kernelGenerateSegment<<<numBlocks, blockDim>>>(sortSegment, batchSize * beamWidth * vocabSize, beamWidth * vocabSize);
-    // thrust::device_ptr<BeamState*> test(nextBeamStates);
-    // thrust::sort_by_key(thrust::device, test, test + 10, sortSegment, beamStateComp);
-    // thrust::sort_by_key(thrust::device, nextBeamStates, nextBeamStates + 5, sortSegment, beamStateComp);
-    // thrust::sort_by_key(thrust::device, sortSegment, sortSegment + batchSize * beamWidth * vocabSize, nextBeamStates, thrust::less<int>());
+    // std::cout << d_vec.size() << std::endl;
+    // thrust::sort(thrust::device, d_vec.begin(), d_vec.end());
+    // device_string d_str_top = d_vec[0];
+    // char d_str_val[255];
+    // cudaMemcpy(d_str_val, d_str_top.raw, 255, cudaMemcpyDeviceToHost);
+    // std::cout << d_str_val << std::endl;
+
+    
+    batchSortbyStr<int>(batchSize, d_vec, pathHashes, pathHashesScratch, nextBeamStates, beamStates);
+    // batchSortbyKey<int>(batchSize, pathHashes, pathHashesScratch, nextBeamStates, beamStates);
+    
+// thrust::sort_by_key(thrust::device, pathHashes, pathHashes + numPaths, nextBeamStates);
+    
+
 
     // test + scan to get index in merged array (unique paths)
     numBlocks = (batchSize * beamWidth * vocabSize + blockDim - 1) / blockDim;
