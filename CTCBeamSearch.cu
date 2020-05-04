@@ -33,27 +33,6 @@ int strHashCode(char* str, int len) {
     return hash;
 }
 
-// __host__ __device__ int beamStateComp(const BeamState* b1, const BeamState* b2){
-//     if(b1 == NULL && b2 == NULL){
-//         return 0;
-//     }else if(b1 == NULL){
-//         return -1;
-//     }else if(b2 == NULL){
-//         return 1;
-//     }else{
-//         return strComp(b1->path, b2->path);
-//     }
-//     // if(&b1 == NULL && &b2 == NULL){
-//     //     return 0;
-//     // }else if(&b1 == NULL){
-//     //     return -1;
-//     // }else if(&b2 == NULL){
-//     //     return 1;
-//     // }else{
-//     //     return strComp(b1.path, b2.path);
-//     // }
-// }
-
 __device__ int beamStateComp(const void* p1, const void* p2){
     const struct BeamState *b1 = *(struct BeamState * const *)p1;
     const struct BeamState *b2 = *(struct BeamState * const *)p2;
@@ -102,7 +81,7 @@ struct GlobalConstants {
 
 __constant__ GlobalConstants cuConstParams;
 // __device__ int cuNumPaths;
-__global__ void kernelkernel(int* diff) {
+__global__ void kernelkernel(int* diff, BeamState** state, float* prob) {
     // for cuda-gdb
 }
 
@@ -270,14 +249,15 @@ __global__ void decomposeInclusiveScan(int batchSize, int* differentPathTest, in
 
     int bi = pid / (vocabSize * beamWidth);
     int pi = pid % (vocabSize * beamWidth);
-    if (pi >= batchNumPaths[bi]) return; // clear?
+    if (pi >= batchNumPaths[bi]) return; 
     // first batch need not change
     if(bi == 0) {
-        differentPathTestBuffer[pid] = differentPathTest[pid];
+        differentPathTestBuffer[pid] = differentPathTest[pid] - 1;
         return;
     }
 
-    differentPathTestBuffer[pid] = differentPathTest[pid] - differentPathTest[bi * vocabSize * beamWidth - 1]; 
+    int offset = bi * (vocabSize * beamWidth);
+    differentPathTestBuffer[pid] = differentPathTest[pid] - differentPathTest[bi * vocabSize * beamWidth - 1] + offset -1; 
 }
 
 // prob: batchSize, vocabSize
@@ -423,10 +403,16 @@ __global__ void kernelTestDifferentPaths(int* pathHashes, int* differentPathTest
 
 
 
-__global__ void kernelMergeSamePaths(int* differentPathTest, BeamState** dest, BeamState** src, float* mergedProbs, int numPaths) {
+__global__ void kernelMergeSamePaths(int* differentPathTest, BeamState** dest, BeamState** src, float* mergedProbs, int* batchNumPaths, int batchSize) {
     int pid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (pid >= numPaths) return;
-    int dstIdx = differentPathTest[pid] - 1;
+    int beamWidth = cuConstParams.beamWidth;
+    int vocabSize = cuConstParams.vocabSize;
+    if (pid >= batchSize * beamWidth * vocabSize) return;
+    int bi = pid / (vocabSize * beamWidth);
+    int pi = pid % (vocabSize * beamWidth);
+    if (pi >= batchNumPaths[bi]) return;
+
+    int dstIdx = differentPathTest[pid];
     dest[dstIdx] = src[pid]; 
     atomicAdd(mergedProbs + dstIdx, src[pid]->prob);
 }
@@ -446,7 +432,6 @@ void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep, int batch
     int numBlocks = (batchSize * beamWidth * vocabSize + blockDim - 1) / blockDim;
     kernelGenNextPaths<<<numBlocks, blockDim>>>(vocabProbs, beamStates, 
         nextBeamStates, beamStateBuffer, nextBeamStateBuffer, pathHashes, batchNumPaths, isLastStep, batchSize);
-    // kernelkernel<<<1,1>>>(nextBeamStates, pathHashes);
     // cudaDeviceSynchronize();
 
     // sort by hash to group identical paths
@@ -456,7 +441,6 @@ void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep, int batch
 
     thrust::sort_by_key(thrust::device, pathHashes, pathHashes + numPaths, nextBeamStates);
     batchSortbyKey<int>(batchSize, pathHashes, pathHashesScratch, nextBeamStates, beamStates);
-    // kernelkernel<<<1,1>>>(nextBeamStates, pathHashes);
     
     // TODO: sort nextBeamStates directly
     // kernelGenerateSegment<<<numBlocks, blockDim>>>(sortSegment, batchSize * beamWidth * vocabSize, beamWidth * vocabSize);
@@ -474,7 +458,8 @@ void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep, int batch
 
     // merge the probabilities of identical paths
     error = cudaMemset(beamStates, 0, batchSize * vocabSize * beamWidth * sizeof(BeamState*));
-    kernelMergeSamePaths<<<numBlocks, blockDim>>>(differentPathTestBuffer, beamStates, nextBeamStates, mergedProbs, numPaths);
+    kernelMergeSamePaths<<<numBlocks, blockDim>>>(differentPathTestBuffer, beamStates, nextBeamStates, mergedProbs, batchNumPaths, batchSize);
+    
     // sort by probability
     error = cudaMemcpy(&numPaths, (void *) (differentPathTest + numPaths - 1), sizeof(int), cudaMemcpyDeviceToHost);
     batchSortbyKey<float>(batchSize, mergedProbs, mergedProbsScratch, beamStates, nextBeamStates);
