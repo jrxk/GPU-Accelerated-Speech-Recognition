@@ -7,6 +7,7 @@
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 #include <thrust/device_ptr.h>
+#include <thrust/gather.h>
 #include "CTCBeamSearch.h"
 
 using namespace std;
@@ -100,6 +101,10 @@ __device__ int my_mod(){
     return (my_mod_start++)/8;
 }
 
+__global__ void kernelkernel(BeamState** states, int* hashes) {
+    // for cuda-gdb
+}
+
 __global__ void kernelGenerateSegmentAndIndex(int* segment, int* index, int size, int stride) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= size) return;
@@ -108,13 +113,36 @@ __global__ void kernelGenerateSegmentAndIndex(int* segment, int* index, int size
     index[tid] = tid;
 }
 
-void CTCBeamSearch::batchSortByProb(float* batchProb, BeamState** beamStates, int* sortIdx, int* sortSegment, int batchSize) {
+__global__ void kernelUpdateNumPaths(int* batchNumPaths){
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+    int batchSize = cuConstParams.batchSize;
+    int vocabSize = cuConstParams.vocabSize;
+    int beamWidth = cuConstParams.beamWidth;
+    if (id >= batchSize) return;
+    
+    batchNumPaths[id] = beamWidth > vocabSize ? vocabSize : beamWidth;
+}
+
+void CTCBeamSearch::batchSortByProb(int batchSize) {
     int blockDim = 256;
     int numBlocks = (batchSize * beamWidth * vocabSize + blockDim - 1) / blockDim;
     kernelGenerateSegmentAndIndex<<<numBlocks, blockDim>>>(sortSegment, sortIdx, batchSize * beamWidth * vocabSize, beamWidth * vocabSize);
     int totalSize = batchSize * beamWidth * vocabSize;
-    thrust::stable_sort_by_key(thrust::device, batchProb, batchProb + totalSize, sortIdx, thrust::greater<float>());
-    // thrust::gather (need a different gather destination array)
+    // keep an original copy of prob
+    cudaMemcpy(mergedProbsScratch, mergedProbs, totalSize * sizeof(float), cudaMemcpyDeviceToDevice);
+    // sortIdx is mixed decreasing order
+    thrust::stable_sort_by_key(thrust::device, mergedProbsScratch, mergedProbsScratch + totalSize, sortIdx, thrust::greater<float>());
+    // gather segment to get the corresponding segment for each index
+    thrust::gather(thrust::device, sortIdx, sortIdx + totalSize, sortSegment, sortSegmentScratch);
+    std::swap(sortSegment, sortSegmentScratch);
+    // sortIdx is the final order (increasing segment, decreasing prob)
+    thrust::stable_sort_by_key(thrust::device, sortSegment, sortSegment + totalSize, sortIdx, thrust::less<int>());
+    // gather prob by the final order
+    thrust::gather(thrust::device, sortIdx, sortIdx + totalSize, mergedProbs, mergedProbsScratch);
+    std::swap(mergedProbs, mergedProbsScratch);
+    // gather beam states by the final order
+    thrust::gather(thrust::device, sortIdx, sortIdx + totalSize, beamStates, nextBeamStates);
+    std::swap(beamStates, nextBeamStates);
 }
 
 void CTCBeamSearch::setup(int batchSize) {
@@ -131,13 +159,16 @@ void CTCBeamSearch::setup(int batchSize) {
     cudaMemcpyToSymbol(cuConstParams, &params, sizeof(GlobalConstants));
 
     // allocate buffers
-    cudaMalloc(&sortIdx, batchSize * beamWidth * vocabSize * sizeof(int));
-    cudaMalloc(&sortSegment, batchSize * beamWidth * vocabSize * sizeof(int));
+    cudaError_t error;
+    error = cudaMalloc(&sortIdx, batchSize * beamWidth * vocabSize * sizeof(int));
+    error = cudaMalloc(&sortSegment, batchSize * beamWidth * vocabSize * sizeof(int));
+    error = cudaMalloc(&sortIdxScratch, batchSize * beamWidth * vocabSize * sizeof(int));
+    error = cudaMalloc(&sortSegmentScratch, batchSize * beamWidth * vocabSize * sizeof(int));
+    error = cudaMalloc(&mergedProbsScratch, batchSize * beamWidth * vocabSize * sizeof(float));
     // int blockDim = 256;
     // int numBlocks = (batchSize * beamWidth * vocabSize + blockDim - 1) / blockDim;
     // kernelGenerateSegmentAndIndex<<<numBlocks, blockDim>>>(sortSegment, sortIdx, batchSize * beamWidth * vocabSize, beamWidth * vocabSize);
-    
-    cudaError_t error;
+
     error = cudaMalloc(&beamStates, batchSize * beamWidth * vocabSize * sizeof(BeamState*));
     error = cudaMalloc(&nextBeamStates, batchSize * beamWidth * vocabSize * sizeof(BeamState*));
     error = cudaMalloc(&beamStateBuffer, batchSize * beamWidth * vocabSize * sizeof(BeamState));
@@ -171,7 +202,7 @@ string CTCBeamSearch::decode(cuMatrix<float>* seqProb, int timestep, int batchSi
     // iterate through timestep
     for (int t = 1; t < timestep; t++){
         float* prob = getBatchAtT(seqProb->getDev(), t, batchSize, vocabSize);
-        extendAndPrune(prob, t == timestep - 1);
+        extendAndPrune(prob, t == timestep - 1, batchSize);
     }
 
     int bestLen;
@@ -237,14 +268,18 @@ void CTCBeamSearch::initialPath(float* prob, int batchSize) {
     // // prune
     // error = cudaMemcpy(mergedProbs, prob, vocabSize * sizeof(float), cudaMemcpyDeviceToDevice);
     
-
     int blockDim = 256;
     int numBlocks = (batchSize * vocabSize + blockDim - 1) / blockDim;
     kernelInitialPath<<<numBlocks, blockDim>>>(prob, beamStates, beamStateBuffer, mergedProbs, batchNumPaths);
     
-    numPaths = vocabSize;
-    thrust::sort_by_key(thrust::device, mergedProbs, mergedProbs + numPaths, beamStates, thrust::greater<float>());
-    numPaths = beamWidth > vocabSize ? vocabSize : beamWidth;
+    // prune initial path
+    batchSortByProb(batchSize);
+    numBlocks = (batchSize + blockDim - 1) / blockDim;
+    kernelUpdateNumPaths<<<numBlocks, blockDim>>>(batchNumPaths);
+
+    // numPaths = vocabSize;
+    // thrust::sort_by_key(thrust::device, mergedProbs, mergedProbs + numPaths, beamStates, thrust::greater<float>());
+    // numPaths = beamWidth > vocabSize ? vocabSize : beamWidth;
 
     // if (error != cudaSuccess) {
     //     fprintf(stderr,"cudaError: %s %s %d\n", cudaGetErrorString(error), __FILE__, __LINE__);
@@ -254,26 +289,30 @@ void CTCBeamSearch::initialPath(float* prob, int batchSize) {
 // TODO: handle length exceeding max len
 __global__ void kernelGenNextPaths(float* vocabProbs, BeamState** beamStates, 
     BeamState** nextBeamStates, BeamState* beamStateBuffer, BeamState* nextBeamStateBuffer, 
-    int* pathHashes, int numPaths, bool isLastStep) {
+    int* pathHashes, int* batchNumPaths, bool isLastStep, int batchSize) {
 
     int pid = blockIdx.x * blockDim.x + threadIdx.x;
     int vocabSize = cuConstParams.vocabSize;
-    // int beamWidth = cuConstParams.beamWidth;
+    int beamWidth = cuConstParams.beamWidth;
     int blankID = cuConstParams.blankID;
     char* vocab = cuConstParams.vocab;
 
-    if (pid >= vocabSize * numPaths) return;
+    if (pid >= batchSize * vocabSize * beamWidth) return;
     
-    int pi = pid / vocabSize;
-    int vi = pid % vocabSize;
+    int bi = pid / (vocabSize * beamWidth);
+    int batchOffset = pid % (vocabSize * beamWidth);
+    int pi = batchOffset / vocabSize;
+    if (pi >= batchNumPaths[bi]) return;
+    int vi = batchOffset % vocabSize;
 
+    BeamState** batchOldBeamStates = beamStates + bi * beamWidth * vocabSize;
     BeamState* newBeamState = &(nextBeamStateBuffer[pid]);
-    BeamState* oldBeamState = beamStates[pi];
+    BeamState* oldBeamState = batchOldBeamStates[pi];
     nextBeamStates[pid] = newBeamState;
     char* newPath = newBeamState->path;
     char* oldPath = oldBeamState->path;
     memcpy(newPath, oldPath, DECODE_MAX_LEN * sizeof(char));
-    newBeamState->prob = oldBeamState->prob * vocabProbs[vi];
+    newBeamState->prob = oldBeamState->prob * vocabProbs[bi * vocabSize + vi];
     // extend with blank
     if (vi == blankID) {
         // path last char is blank
@@ -310,9 +349,7 @@ __global__ void kernelTestDifferentPaths(int* pathHashes, int* differentPathTest
     if (pid == 0 || pathHashes[pid] != pathHashes[pid-1]) differentPathTest[pid] = 1; 
 }
 
-__global__ void kernelkernel(float* a1, BeamState** a2) {
-    // for cuda-gdb
-}
+
 
 __global__ void kernelMergeSamePaths(int* differentPathTest, BeamState** dest, BeamState** src, float* mergedProbs, int numPaths) {
     int pid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -328,16 +365,16 @@ __global__ void kernelWriteMergedProbs(float* mergedProbs, BeamState** beamState
     beamStates[pid]->prob = mergedProbs[pid];
 }
 
-void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep){
+void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep, int batchSize){
     // Assume: cudaMalloc initialize memory to zero
     cudaError_t error;
-    error = cudaMemset(mergedProbs, 0, vocabSize * beamWidth * sizeof(float));
+    error = cudaMemset(mergedProbs, 0, batchSize * vocabSize * beamWidth * sizeof(float));
     // generate all possible new paths (numPaths * vocabSize)
     int blockDim = 256;
-    int numBlocks = (numPaths * vocabSize + blockDim - 1) / blockDim;
+    int numBlocks = (batchSize * beamWidth * vocabSize + blockDim - 1) / blockDim;
     kernelGenNextPaths<<<numBlocks, blockDim>>>(vocabProbs, beamStates, 
-        nextBeamStates, beamStateBuffer, nextBeamStateBuffer, pathHashes, numPaths, isLastStep);
-    
+        nextBeamStates, beamStateBuffer, nextBeamStateBuffer, pathHashes, batchNumPaths, isLastStep, batchSize);
+    kernelkernel<<<1,1>>>(nextBeamStates, pathHashes);
     // cudaDeviceSynchronize();
 
     // sort by hash to group identical paths

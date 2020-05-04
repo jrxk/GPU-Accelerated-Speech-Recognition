@@ -50,13 +50,18 @@ class CTCBeamSearch
 
     int* pathHashes; // vocabSize * beamWidth
     int* differentPathTest;
+    
     float* mergedProbs;
+    float* mergedProbsScratch; // scratch for thrust::gather
+
     int numPaths;
     int* batchNumPaths;
 
     // int* h_sortSegment;
     int* sortIdx;
     int* sortSegment;
+    int* sortIdxScratch; // scratch for thrust::gather
+    int* sortSegmentScratch; // scratch for thrust::gather
   
 
 
@@ -85,6 +90,12 @@ public:
       pathHashes = NULL;
       differentPathTest = NULL;
       mergedProbs = NULL;
+      batchNumPaths = NULL;
+      sortIdx = NULL;
+      sortSegment = NULL;
+      sortIdxScratch = NULL;
+      sortSegmentScratch = NULL;
+      mergedProbsScratch = NULL;
   };
 
   void setup(int batchSize);
@@ -95,13 +106,13 @@ public:
 
   void initialPath(float* prob, int batchSize); 
   
-  void batchSortByProb(float* batchProb, BeamState** beamStates, int* sortIdx, int* sortSegment, int batchSize);
+  void batchSortByProb(int batchSize);
 
   void prune();
   
   // void extend(float* prob);
   
-  void extendAndPrune(float* prob, bool isLastStep);
+  void extendAndPrune(float* prob, bool isLastStep, int batchSize);
   
   void mergeIdenticalPaths();
 
