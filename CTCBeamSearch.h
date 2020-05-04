@@ -51,6 +51,7 @@ class CTCBeamSearch
     int* pathHashes; // vocabSize * beamWidth
     int* pathHashesScratch;
     int* differentPathTest;
+    int* differentPathTestBuffer;
     
     float* mergedProbs;
     float* mergedProbsScratch; // scratch for thrust::gather
@@ -91,6 +92,7 @@ public:
       pathHashes = NULL;
       pathHashesScratch = NULL;
       differentPathTest = NULL;
+      differentPathTestBuffer = NULL;
       mergedProbs = NULL;
       batchNumPaths = NULL;
       sortIdx = NULL;
