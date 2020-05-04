@@ -49,6 +49,7 @@ class CTCBeamSearch
     // float* nextProbs;
 
     int* pathHashes; // vocabSize * beamWidth
+    int* pathHashesScratch;
     int* differentPathTest;
     
     float* mergedProbs;
@@ -88,6 +89,7 @@ public:
       beamStateBuffer = NULL;
       nextBeamStateBuffer = NULL;
       pathHashes = NULL;
+      pathHashesScratch = NULL;
       differentPathTest = NULL;
       mergedProbs = NULL;
       batchNumPaths = NULL;
@@ -107,6 +109,9 @@ public:
   void initialPath(float* prob, int batchSize); 
   
   void batchSortByProb(int batchSize);
+
+  template <class T>
+  void batchSortbyKey(int batchSize, T* &key, T* &keyScratch, BeamState** &originalBeamState, BeamState** &bufferBeamState);
 
   void prune();
   
