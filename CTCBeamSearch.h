@@ -1,6 +1,7 @@
 #include <vector>
 #include <map>
 #include <set> 
+#include <thrust/device_vector.h>
 
 #include "cuMatrix.h"
 // #include "CTCNode.h"
@@ -49,8 +50,19 @@ class CTCBeamSearch
 
     int* pathHashes; // vocabSize * beamWidth
     int* differentPathTest;
+    
     float* mergedProbs;
+    float* mergedProbsScratch; // scratch for thrust::gather
+
     int numPaths;
+    int* batchNumPaths;
+
+    // int* h_sortSegment;
+    int* sortIdx;
+    int* sortSegment;
+    int* sortIdxScratch; // scratch for thrust::gather
+    int* sortSegmentScratch; // scratch for thrust::gather
+  
 
 
 public:
@@ -78,18 +90,30 @@ public:
       pathHashes = NULL;
       differentPathTest = NULL;
       mergedProbs = NULL;
+      batchNumPaths = NULL;
+      sortIdx = NULL;
+      sortSegment = NULL;
+      sortIdxScratch = NULL;
+      sortSegmentScratch = NULL;
+      mergedProbsScratch = NULL;
   };
 
-  void setup();
+  void setup(int batchSize);
 
-
-  string decode(cuMatrix<float>* seqProb); // assume prob is [seq,vocab] for now (no batch)
+  string decode(cuMatrix<float>* seqProb, int timestep, int batchSize); // assume prob is [seq,vocab] for now (no batch)
+  
   void helper();
 
-  void initialPath(float* prob); 
+  void initialPath(float* prob, int batchSize); 
+  
+  void batchSortByProb(int batchSize);
+
   void prune();
-  void extend(float* prob);
-  void extendAndPrune(float* prob, bool isLastStep);
+  
+  // void extend(float* prob);
+  
+  void extendAndPrune(float* prob, bool isLastStep, int batchSize);
+  
   void mergeIdenticalPaths();
 
 };
