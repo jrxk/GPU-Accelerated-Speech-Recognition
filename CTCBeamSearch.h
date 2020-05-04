@@ -104,7 +104,7 @@ public:
 
   void setup(int batchSize);
 
-  string decode(cuMatrix<float>* seqProb, int timestep, int batchSize); // assume prob is [seq,vocab] for now (no batch)
+  vector<pair<string, float>> decode(cuMatrix<float>* seqProb, int timestep, int batchSize); // assume prob is [seq,vocab] for now (no batch)
   
   void helper();
 

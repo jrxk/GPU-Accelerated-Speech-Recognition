@@ -221,7 +221,7 @@ void CTCBeamSearch::setup(int batchSize) {
 
 // Decode
 
-string CTCBeamSearch::decode(cuMatrix<float>* seqProb, int timestep, int batchSize) {
+vector<pair<string, float>> CTCBeamSearch::decode(cuMatrix<float>* seqProb, int timestep, int batchSize) {
     setup(batchSize);
     // get time step
     // int timestep = seqProb->getRows();
@@ -245,14 +245,32 @@ string CTCBeamSearch::decode(cuMatrix<float>* seqProb, int timestep, int batchSi
     int bestLen;
     char best[DECODE_MAX_LEN];
     BeamState* bestState;
-    cudaMemcpy(&bestState, beamStates, sizeof(BeamState*), cudaMemcpyDeviceToHost);
-    cudaMemcpy(&bestLen, &(bestState->len), sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(best, bestState->path, bestLen, cudaMemcpyDeviceToHost);
-    string best_string = string(best, bestLen);
+    string best_string;
     float bestScore;
-    cudaMemcpy(&bestScore, &(bestState->prob), sizeof(float), cudaMemcpyDeviceToHost);
-    std::cout << "Best Score: " << bestScore << std::endl; 
-    return best_string;
+    pair <string,double> resultPair;
+    vector<pair<string, float>> bestResults;
+    for (int i = 0; i < batchSize; i++){
+        cudaMemcpy(&bestState, beamStates + i * beamWidth * vocabSize, sizeof(BeamState*), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&bestLen, &(bestState->len), sizeof(int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(best, bestState->path, bestLen, cudaMemcpyDeviceToHost);
+        best_string = string(best, bestLen);
+        cudaMemcpy(&bestScore, &(bestState->prob), sizeof(float), cudaMemcpyDeviceToHost);
+        resultPair = make_pair(best_string, bestScore);
+        bestResults.push_back(resultPair);
+    }
+    
+    return bestResults;
+    // int bestLen;
+    // char best[DECODE_MAX_LEN];
+    // BeamState* bestState;
+    // cudaMemcpy(&bestState, beamStates, sizeof(BeamState*), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(&bestLen, &(bestState->len), sizeof(int), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(best, bestState->path, bestLen, cudaMemcpyDeviceToHost);
+    // string best_string = string(best, bestLen);
+    // float bestScore;
+    // cudaMemcpy(&bestScore, &(bestState->prob), sizeof(float), cudaMemcpyDeviceToHost);
+    // std::cout << "Best Score: " << bestScore << std::endl; 
+    // return best_string;
 }
 
 __global__ void decomposeInclusiveScan(int batchSize, int* differentPathTest, int* differentPathTestBuffer, int* batchNumPaths){
@@ -432,10 +450,20 @@ __global__ void kernelMergeSamePaths(int* differentPathTest, BeamState** dest, B
     atomicAdd(mergedProbs + dstIdx, src[pid]->prob);
 }
 
-__global__ void kernelWriteMergedProbs(float* mergedProbs, BeamState** beamStates, int numPaths) {
+__global__ void kernelWriteMergedProbs(float* mergedProbs, BeamState** beamStates, int* batchNumPaths) {
     int pid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (pid >= numPaths) return;
+    int beamWidth = cuConstParams.beamWidth;
+    int vocabSize = cuConstParams.vocabSize;
+    int batchSize = cuConstParams.batchSize;
+
+    if (pid >= batchSize * beamWidth * vocabSize) return;
+    int bi = pid / (vocabSize * beamWidth);
+    int pi = pid % (vocabSize * beamWidth);
+    if (pi >= batchNumPaths[bi]) return;
+
     beamStates[pid]->prob = mergedProbs[pid];
+    // if (pid >= numPaths) return;
+    // beamStates[pid]->prob = mergedProbs[pid];
 }
 
 void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep, int batchSize){
@@ -485,15 +513,17 @@ void CTCBeamSearch::extendAndPrune(float* vocabProbs, bool isLastStep, int batch
     kernelUpdateNumPathsPrune<<<numBlocks, blockDim>>>(batchNumPaths);
 
     // write merged probablities back to BeamState
+    kernelkernel<<<1,1>>>(mergedProbs, beamStates, batchNumPaths);
     numBlocks = (batchSize * beamWidth * vocabSize + blockDim - 1) / blockDim;
-    kernelWriteMergedProbs<<<numBlocks, blockDim>>>(mergedProbs, beamStates, numPaths);
-
+    kernelWriteMergedProbs<<<numBlocks, blockDim>>>(mergedProbs, beamStates, batchNumPaths);
+    kernelkernel<<<1,1>>>(mergedProbs, beamStates, batchNumPaths);
     // std::swap(beamStates, nextBeamStates);
     std::swap(beamStateBuffer, nextBeamStateBuffer);
 
     error = cudaMemset(nextBeamStateBuffer, 0, batchSize * vocabSize * beamWidth * sizeof(BeamState));
     error = cudaMemset(nextBeamStates, 0, batchSize * vocabSize * beamWidth * sizeof(BeamState*));
     error = cudaMemset(pathHashes, 0, batchSize * vocabSize * beamWidth * sizeof(int));
+    error = cudaMemset(pathHashesScratch, 0, batchSize * vocabSize * beamWidth * sizeof(int));
     error = cudaMemset(differentPathTest, 0, batchSize * vocabSize * beamWidth * sizeof(int));
     error = cudaMemset(differentPathTestBuffer, 0, batchSize * vocabSize * beamWidth * sizeof(int));
     if (error != cudaSuccess) {
