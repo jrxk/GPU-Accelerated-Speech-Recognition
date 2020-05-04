@@ -15,6 +15,29 @@ struct BeamState
   char path[DECODE_MAX_LEN];
 };
 
+struct device_string {
+
+    __host__ __device__ device_string() {
+      raw = NULL;
+    }
+
+    __host__ __device__ device_string(char* cstr) : raw(cstr) {}
+
+    char* raw;
+
+    bool __device__ operator<(device_string rhs) {
+        char* l = raw;
+        char* r = rhs.raw;
+
+        for( ; *l && *r && *l==*r; )
+        {
+            ++l;
+            ++r;
+        }
+        return *l > *r;
+    }
+};
+
 class CTCBeamSearch 
 {
     char* vocab; // vocab should include blank
@@ -65,7 +88,7 @@ class CTCBeamSearch
     int* sortIdxScratch; // scratch for thrust::gather
     int* sortSegmentScratch; // scratch for thrust::gather
   
-
+    // thrust::device_vector<device_string> dVecPaths;
 
 public:
   // CTCBeamSearch(const vector<string> &vocab, int beamWidth, int blankID, int decodeMaxLen):vocab(vocab), beamWidth(beamWidth), blankID(blankID), decodeMaxLen(decodeMaxLen){
@@ -100,6 +123,7 @@ public:
       sortIdxScratch = NULL;
       sortSegmentScratch = NULL;
       mergedProbsScratch = NULL;
+      // dVecPaths.reserve(batchSize * beamWidth * vocabSize);
   };
 
   void setup(int batchSize);
@@ -114,7 +138,10 @@ public:
 
   template <class T>
   void batchSortbyKey(int batchSize, T* &key, T* &keyScratch, BeamState** &originalBeamState, BeamState** &bufferBeamState);
-
+  
+  template <class T>
+  void batchSortbyStr(int batchSize, thrust::device_vector<device_string> dVecStr, T* &key, T* &keyScratch, BeamState** &originalBeamState, BeamState** &bufferBeamState);
+  
   void prune();
   
   // void extend(float* prob);

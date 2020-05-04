@@ -46,32 +46,35 @@ int main() {
 
     // test CTC
     char vocab[] = {'$','a', 'b', 'c'}; // blank in the vocab must be a special symbol
-    // int vocabsize = 4;
-    // int batchSize = 1;
-    // float test[] = {0.36225085, 0.09518672, 0.08850375, 0.45405867,
-    //                 0.08869431, 0.18445025, 0.3304224,  0.39643304,
-    //                 0.09951598, 0.17646984, 0.42063249, 0.30338169,
-    //                 0.15361776, 0.46521112, 0.18132693, 0.19984419,
-    //                 0.33478711, 0.16607367, 0.29571415, 0.20342507,
-    //                 0.01292992, 0.36438928, 0.00184853, 0.62083227,
-    //                 0.34142441, 0.16742833, 0.38500542, 0.10614183,
-    //                 0.4443139,  0.12738693, 0.36856127, 0.0597379,
-    //                 0.37673064, 0.13478024, 0.2735787,  0.21491042,
-    //                 0.34790623, 0.04654182, 0.34069546, 0.26485648}; 
-    // vector<string> vocab (v, v + sizeof(v) / sizeof(string) );
-    CTCBeamSearch* decoder = new CTCBeamSearch(vocab, vocab_size + 1, 2, 0);
-    // cuMatrix<float>* seqProb = new cuMatrix<float>(10, 4, 1);
-    // for(int j = 0; j < seqProb->getLen(); j++){
-    //     seqProb->getHost()[j] =  test[j];
-    // }
+    int vocabsize = 4;
+    int batchSize = 1;
+    float test[] = {0.36225085, 0.09518672, 0.08850375, 0.45405867,
+                    0.08869431, 0.18445025, 0.3304224,  0.39643304,
+                    0.09951598, 0.17646984, 0.42063249, 0.30338169,
+                    0.15361776, 0.46521112, 0.18132693, 0.19984419,
+                    0.33478711, 0.16607367, 0.29571415, 0.20342507,
+                    0.01292992, 0.36438928, 0.00184853, 0.62083227,
+                    0.34142441, 0.16742833, 0.38500542, 0.10614183,
+                    0.4443139,  0.12738693, 0.36856127, 0.0597379,
+                    0.37673064, 0.13478024, 0.2735787,  0.21491042,
+                    0.34790623, 0.04654182, 0.34069546, 0.26485648}; 
 
-    // seqProb->toGpu();
-    vector<pair<string, float>> bestResults = decoder->decode(out, seq_len, batch_size);
+    // CTCBeamSearch* decoder = new CTCBeamSearch(vocab, vocab_size + 1, 2, 0);
+    
+    CTCBeamSearch* decoder = new CTCBeamSearch(vocab, 4, 2, 0);
+    
+    cuMatrix<float>* seqProb = new cuMatrix<float>(10, 4, 1);
+    for(int j = 0; j < seqProb->getLen(); j++){
+        seqProb->getHost()[j] =  test[j];
+    }
+
+    seqProb->toGpu();
+    vector<pair<string, float>> bestResults = decoder->decode(seqProb, 10, 1);
     for(int i = 0; i < batch_size; i++){
         std::cout << "decoding results: " << bestResults[i].first << ", decoding score: " << bestResults[i].second << std::endl;
     }
 
     // // matrixMul(&x, &y, &z);
     double endTime = CycleTimer::currentSeconds();
-    std::cout << (endTime - startTime) << "s" << std::endl;
+    // std::cout << (endTime - startTime) << "s" << std::endl;
 }
