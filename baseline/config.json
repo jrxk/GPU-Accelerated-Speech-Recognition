@@ -1,26 +1,29 @@
 [
     {
-        "batch_size": 1,
+        "batch_size": 256,
         "input_size": 26,
         "n_context": 1,
         "linear_size": 2048,
         "rnn_hidden_size": 2048,
-        "vocab_size": 26,
-        "seg_len" : 100,
-        "epoch" : 1,
-        "device" : "cuda",
-        "num_processes": 1
+        "vocab_size": 46,
+        "seg_len" : 200,
+        "epoch" : 10,
+        "device" : "cpu",
+        "num_threads" : 4,
+        "beam_width" : 100
     },
     {
-        "batch_size": 1,
+        "batch_size": 256,
         "input_size": 26,
         "n_context": 1,
         "linear_size": 2048,
         "rnn_hidden_size": 2048,
-        "vocab_size": 26,
+        "vocab_size": 46,
         "seg_len" : 200,
-        "epoch" : 1,
+        "epoch" : 10,
         "device" : "cuda",
-        "num_processes": 1
+        "num_threads" : 4,
+        "beam_width" : 100
     }
+    
 ]
