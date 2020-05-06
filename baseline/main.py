@@ -20,9 +20,8 @@ def run(config):
     
     beam_width = config["beam_width"]
     # print("num_processes_cpu: ", os.cpu_count())
-
+    num_threads = config["num_threads"]
     if device == "cpu":
-        num_threads = config["num_threads"]
         torch.set_num_threads(num_threads)
         print("num_threads: " ,torch.get_num_threads())
     model = DeepSpeech(config)
